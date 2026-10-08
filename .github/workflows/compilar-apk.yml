@@ -1,1 +1,138 @@
+name: Compilar Keplerae 2.0 - Material You
 
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      testar_interface:
+        description: Executar testes de login, perfil, catálogo e PDF no emulador
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apk-zip-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: android-project
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extrair o projeto 2.0
+        working-directory: .
+        run: |
+          test -f Keplerae-2.0-Material-You.zip
+          unzip -q Keplerae-2.0-Material-You.zip -d android-project
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Instalar SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Recuperar assinatura que já funciona no Google
+        uses: actions/cache@v4
+        with:
+          path: android-project/.signing/debug.keystore
+          key: keplerae-native-debug-signing-v1
+      - name: Conferir a assinatura existente
+        run: |
+          test -s .signing/debug.keystore || { echo 'A assinatura anterior não está no cache. Recupere a chave usada no APK 1.2.2 antes de compilar a atualização.'; exit 1; }
+          keytool -exportcert -keystore .signing/debug.keystore -storepass android -alias androiddebugkey -file /tmp/keplerae-cert.der
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          expected = '16007901DBBFAB9DE7B5539FFAC604FAF19DBC8A'
+          actual = hashlib.sha1(Path('/tmp/keplerae-cert.der').read_bytes()).hexdigest().upper()
+          if actual != expected:
+              raise SystemExit('A assinatura difere do APK que já funciona. Recupere a chave anterior para preservar atualização e OAuth.')
+          print('Assinatura anterior preservada.')
+          PY
+      - name: Configurar entrada Google
+        env:
+          GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+        run: python3 scripts/configure_google_login.py
+      - name: Validar catálogo e rede
+        run: |
+          python3 scripts/validate_catalog.py
+          python3 scripts/validate_network_permissions.py
+      - name: Compilar, testar e verificar
+        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Validar APK e nomear
+        run: |
+          python3 scripts/validate_network_permissions.py app/build/outputs/apk/debug/app-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk Keplerae-2.0.0-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Keplerae-2.0-APK
+          path: android-project/Keplerae-2.0.0-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Resultados das verificações
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Keplerae-2.0-verificacoes
+          path: |
+            android-project/app/build/reports/tests/
+            android-project/app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+
+  interface:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.testar_interface }}
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extrair projeto
+        run: unzip -q Keplerae-2.0-Material-You.zip -d android-project
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Instalar SDK para compilar testes
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Ativar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          script: |
+            gradle --no-daemon -p android-project :app:connectedDebugAndroidTest
+            mkdir -p android-project/app/build/design-preview
+            adb pull /sdcard/Android/data/com.aistudio.keplerae.stdy/files/design-preview/. android-project/app/build/design-preview/ || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Keplerae-2.0-testes-dispositivo
+          path: |
+            android-project/app/build/reports/androidTests/
+            android-project/app/build/design-preview/
+          if-no-files-found: ignore
