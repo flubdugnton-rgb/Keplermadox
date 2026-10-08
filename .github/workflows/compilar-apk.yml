@@ -16,43 +16,60 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     defaults:
       run:
         working-directory: android-project
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Extrair o projeto
         working-directory: .
         run: |
           test -f keplerae-material-you.zip
           unzip -q keplerae-material-you.zip -d android-project
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
       - name: Instalar SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+
       - name: Preservar assinatura de teste
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
           key: keplerae-debug-signing-v1
+
       - name: Validar catálogo
         run: python3 scripts/validate_catalog.py
+
       - name: Compilar, testar e verificar Android
         run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+
       - name: Nomear APK
         run: cp app/build/outputs/apk/debug/app-debug.apk Keplerae-1.1.0-debug.apk
-      - uses: actions/upload-artifact@v4
+
+      - name: Disponibilizar APK
+        uses: actions/upload-artifact@v4
         with:
           name: Keplerae-APK
           path: android-project/Keplerae-1.1.0-debug.apk
           if-no-files-found: error
           retention-days: 30
+
       - name: Resultados das verificações
         if: always()
         uses: actions/upload-artifact@v4
