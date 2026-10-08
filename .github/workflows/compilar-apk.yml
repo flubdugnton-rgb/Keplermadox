@@ -16,60 +16,61 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     defaults:
       run:
         working-directory: android-project
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Extrair o projeto
         working-directory: .
         run: |
           test -f keplerae-material-you.zip
           unzip -q keplerae-material-you.zip -d android-project
-
+      - name: Aplicar correção do visualizador Drive 1.1.1
+        run: |
+          python3 - <<'PYDRIVE'
+          import json
+          from pathlib import Path
+          updates = json.loads(r'''{
+            "app/src/main/java/com/example/ui/DriveViewer.kt": "@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)\npackage com.example.ui\n\nimport android.content.Context\nimport android.net.Uri\nimport androidx.browser.customtabs.CustomTabColorSchemeParams\nimport androidx.browser.customtabs.CustomTabsClient\nimport androidx.browser.customtabs.CustomTabsIntent\nimport androidx.compose.foundation.layout.*\nimport androidx.compose.material.icons.Icons\nimport androidx.compose.material.icons.filled.*\nimport androidx.compose.material.icons.outlined.*\nimport androidx.compose.material3.*\nimport androidx.compose.runtime.*\nimport androidx.compose.runtime.saveable.rememberSaveable\nimport androidx.compose.ui.Alignment\nimport androidx.compose.ui.Modifier\nimport androidx.compose.ui.graphics.luminance\nimport androidx.compose.ui.graphics.toArgb\nimport androidx.compose.ui.platform.LocalContext\nimport androidx.compose.ui.text.style.TextOverflow\nimport androidx.compose.ui.unit.dp\nimport androidx.compose.ui.window.Dialog\nimport androidx.compose.ui.window.DialogProperties\nimport com.example.data.model.StudyItem\nimport com.example.data.model.isAllowedDriveUrl\nimport com.example.data.repository.StudyState\n\n/** Use the browser's Google session; an isolated WebView cannot share it. */\ninternal fun openMaterialBrowser(context: Context, url: String, toolbarColor: Int, dark: Boolean): Boolean {\n    if (!isAllowedDriveUrl(url)) return false\n    return runCatching {\n        val provider = CustomTabsClient.getPackageName(context, null)\n        if (provider == null) {\n            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)))\n        } else {\n            val tab = CustomTabsIntent.Builder()\n                .setShowTitle(true)\n                .setColorScheme(if (dark) CustomTabsIntent.COLOR_SCHEME_DARK else CustomTabsIntent.COLOR_SCHEME_LIGHT)\n                .setDefaultColorSchemeParams(CustomTabColorSchemeParams.Builder().setToolbarColor(toolbarColor).build())\n                .build()\n            tab.intent.setPackage(provider)\n            // Preserve the original link, including resourcekey and sharing parameters.\n            tab.launchUrl(context, Uri.parse(url))\n        }\n        true\n    }.getOrElse {\n        runCatching {\n            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)))\n            true\n        }.getOrDefault(false)\n    }\n}\n\n@Composable fun DriveViewer(item: StudyItem, state: StudyState, onDismiss: () -> Unit,\n    onFavorite: () -> Unit, onCompleted: () -> Unit) {\n    val context = LocalContext.current\n    val toolbarColor = MaterialTheme.colorScheme.surface.toArgb()\n    val dark = MaterialTheme.colorScheme.surface.luminance() < .5f\n    var launched by rememberSaveable(item.id) { mutableStateOf(false) }\n    var opened by rememberSaveable(item.id) { mutableStateOf(false) }\n    fun openMaterial() { opened = openMaterialBrowser(context, item.url, toolbarColor, dark) }\n    LaunchedEffect(item.id) {\n        if (!launched) { launched = true; openMaterial() }\n    }\n    Dialog(onDismissRequest = onDismiss,\n        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {\n        Surface(Modifier.fillMaxSize()) {\n            Scaffold(\n                topBar = { TopAppBar(title = { Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },\n                    navigationIcon = { IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, \"Fechar\") } },\n                    actions = { IconButton(onClick = onFavorite) {\n                        Icon(if (item.id in state.favorites) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, \"Favoritar\")\n                    } }) },\n                bottomBar = {\n                    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {\n                        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp),\n                            verticalArrangement = Arrangement.spacedBy(8.dp)) {\n                            if (item.note.isNotBlank()) Text(item.note, style = MaterialTheme.typography.bodySmall)\n                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {\n                                FilledTonalButton(onClick = { openDrive(context, item.url) }, modifier = Modifier.weight(1f)) {\n                                    Text(\"Abrir no Drive\")\n                                }\n                                Button(onClick = onCompleted, modifier = Modifier.weight(1f)) {\n                                    Text(if (item.id in state.completed) \"Concluído ✓\" else \"Concluir\")\n                                }\n                            }\n                            Text(\"Use no navegador a conta Google que tem acesso ao material.\",\n                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)\n                        }\n                    }\n                }\n            ) { padding ->\n                Column(Modifier.fillMaxSize().padding(padding).padding(24.dp),\n                    verticalArrangement = Arrangement.Center,\n                    horizontalAlignment = Alignment.CenterHorizontally) {\n                    Icon(Icons.Outlined.OpenInNew, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)\n                    Spacer(Modifier.height(16.dp))\n                    Text(if (opened) \"Continue seus estudos\" else \"Escolha como abrir o material\",\n                        style = MaterialTheme.typography.titleLarge)\n                    Spacer(Modifier.height(8.dp))\n                    Text(if (opened) \"Ao terminar, use Voltar ou Fechar no visualizador para retornar ao Kepleræ.\"\n                        else \"Toque em Abrir material ou use Abrir no Drive.\")\n                    Spacer(Modifier.height(20.dp))\n                    Button(onClick = ::openMaterial) { Text(if (opened) \"Abrir novamente\" else \"Abrir material\") }\n                }\n            }\n        }\n    }\n}\n",
+            "app/build.gradle.kts": "plugins {\n    id(\"com.android.application\")\n    id(\"org.jetbrains.kotlin.android\")\n    id(\"org.jetbrains.kotlin.plugin.compose\")\n}\nandroid {\n    namespace = \"com.example\"\n    compileSdk = 36\n    defaultConfig {\n        applicationId = \"com.aistudio.keplerae.stdy\"\n        minSdk = 24\n        targetSdk = 36\n        versionCode = 3\n        versionName = \"1.1.1\"\n        testInstrumentationRunner = \"androidx.test.runner.AndroidJUnitRunner\"\n    }\n    buildTypes {\n        release { isMinifyEnabled = false }\n    }\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }\n    buildFeatures { compose = true }\n}\nkotlin { jvmToolchain(17) }\ndependencies {\n    implementation(\"androidx.browser:browser:1.9.0\")\n    val composeVersion = \"1.9.1\"\n    implementation(\"androidx.core:core-ktx:1.16.0\")\n    implementation(\"androidx.activity:activity-compose:1.10.1\")\n    implementation(\"androidx.lifecycle:lifecycle-runtime-compose:2.9.4\")\n    implementation(\"androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4\")\n    implementation(\"androidx.compose.runtime:runtime:$composeVersion\")\n    implementation(\"androidx.compose.foundation:foundation:$composeVersion\")\n    implementation(\"androidx.compose.ui:ui:$composeVersion\")\n    implementation(\"androidx.compose.ui:ui-tooling-preview:$composeVersion\")\n    implementation(\"androidx.compose.material3:material3:1.4.0\")\n    implementation(\"androidx.compose.material:material-icons-extended:1.7.8\")\n    implementation(\"org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2\")\n    testImplementation(\"junit:junit:4.13.2\")\n    androidTestImplementation(\"androidx.test.ext:junit:1.2.1\")\n    androidTestImplementation(\"androidx.test:runner:1.6.2\")\n    androidTestImplementation(\"androidx.compose.ui:ui-test-junit4:$composeVersion\")\n    debugImplementation(\"androidx.compose.ui:ui-tooling:$composeVersion\")\n    debugImplementation(\"androidx.compose.ui:ui-test-manifest:$composeVersion\")\n}\n",
+            "app/src/main/AndroidManifest.xml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n    xmlns:tools=\"http://schemas.android.com/tools\">\n\n    <uses-permission android:name=\"android.intent.permission.INTERNET\" />\n    <uses-permission android:name=\"android.intent.permission.ACCESS_NETWORK_STATE\" />\n\n    <queries>\n        <intent>\n            <action android:name=\"android.support.customtabs.action.CustomTabsService\" />\n        </intent>\n        <intent>\n            <action android:name=\"android.intent.action.VIEW\" />\n            <category android:name=\"android.intent.category.BROWSABLE\" />\n            <data android:scheme=\"https\" />\n        </intent>\n    </queries>\n\n    <application\n        android:allowBackup=\"true\"\n        android:dataExtractionRules=\"@xml/data_extraction_rules\"\n        android:fullBackupContent=\"@xml/backup_rules\"\n        android:icon=\"@mipmap/ic_launcher\"\n        android:label=\"@string/app_name\"\n        android:roundIcon=\"@mipmap/ic_launcher_round\"\n        android:supportsRtl=\"true\"\n        android:theme=\"@style/Theme.MyApplication\">\n        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\"\n            android:label=\"@string/app_name\"\n            android:theme=\"@style/Theme.MyApplication\">\n            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n\n                <category android:name=\"android.intent.category.LAUNCHER\" />\n            </intent-filter>\n        </activity>\n    </application>\n\n</manifest>\n"
+          }''')
+          for name, content in updates.items():
+              target = Path(name)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(content, encoding="utf-8")
+          print("Correção Drive 1.1.1 aplicada: navegador integrado e URLs originais.")
+          PYDRIVE
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Preparar Android SDK
-        uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools'
-
       - name: Instalar SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-
       - name: Preservar assinatura de teste
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
           key: keplerae-debug-signing-v1
-
       - name: Validar catálogo
         run: python3 scripts/validate_catalog.py
-
       - name: Compilar, testar e verificar Android
         run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
-
       - name: Nomear APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Keplerae-1.1.0-debug.apk
-
-      - name: Disponibilizar APK
-        uses: actions/upload-artifact@v4
+        run: cp app/build/outputs/apk/debug/app-debug.apk Keplerae-1.1.1-debug.apk
+      - uses: actions/upload-artifact@v4
         with:
           name: Keplerae-APK
-          path: android-project/Keplerae-1.1.0-debug.apk
+          path: android-project/Keplerae-1.1.1-debug.apk
           if-no-files-found: error
           retention-days: 30
-
       - name: Resultados das verificações
         if: always()
         uses: actions/upload-artifact@v4
