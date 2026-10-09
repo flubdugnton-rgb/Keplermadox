@@ -1,8 +1,8 @@
-name: Compilar Keplerae 2.5 - Release
+name: Compilar Keplerae 2.6 - Release
 on:
   push:
     branches: [main, master]
-    paths: ['Keplerae-2.5.zip', '.github/workflows/compilar-apk.yml']
+    paths: ['Keplerae-2.6.zip', '.github/workflows/compilar-apk.yml']
   workflow_dispatch:
     inputs:
       testar_interface:
@@ -23,11 +23,11 @@ jobs:
         working-directory: android-project
     steps:
       - uses: actions/checkout@v4
-      - name: Extrair projeto 2.5
+      - name: Extrair projeto 2.6
         working-directory: .
         run: |
-          test -f Keplerae-2.5.zip
-          unzip -q Keplerae-2.5.zip -d android-project
+          test -f Keplerae-2.6.zip
+          unzip -q Keplerae-2.6.zip -d android-project
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -54,7 +54,8 @@ jobs:
         run: |
           python3 scripts/validate_catalog.py
           python3 scripts/validate_network_permissions.py
-          python3 scripts/validate_v25.py
+          python3 scripts/validate_v26.py
+          python3 scripts/validate_ambient_sounds.py
       # Valida o código público antes de restaurar a chave privada no runner.
       - name: Restaurar assinatura
         env:
@@ -67,18 +68,18 @@ jobs:
       - name: Validar APK e nomear
         run: |
           python3 scripts/validate_network_permissions.py app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk Keplerae-2.5.0-release.apk
+          cp app/build/outputs/apk/release/app-release.apk Keplerae-2.6.0-release.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: Keplerae-2.5-APK
-          path: android-project/Keplerae-2.5.0-release.apk
+          name: Keplerae-2.6-APK
+          path: android-project/Keplerae-2.6.0-release.apk
           if-no-files-found: error
           retention-days: 30
       - name: Resultados e mapa R8
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Keplerae-2.5-verificacoes
+          name: Keplerae-2.6-verificacoes
           path: |
             android-project/app/build/reports/tests/
             android-project/app/build/reports/lint-results-release.html
@@ -92,7 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Extrair projeto
-        run: unzip -q Keplerae-2.5.zip -d android-project
+        run: unzip -q Keplerae-2.6.zip -d android-project
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -121,7 +122,7 @@ jobs:
         run: python3 scripts/configure_google_login.py
       - uses: actions/download-artifact@v4
         with:
-          name: Keplerae-2.5-APK
+          name: Keplerae-2.6-APK
           path: release-apk
       - name: Ativar KVM
         run: |
@@ -133,14 +134,14 @@ jobs:
           api-level: 35
           arch: x86_64
           script: |
+            python3 android-project/scripts/smoke_release.py release-apk/Keplerae-2.6.0-release.apk
             gradle --no-daemon -p android-project :app:connectedDebugAndroidTest
-            python3 android-project/scripts/smoke_release.py release-apk/Keplerae-2.5.0-release.apk
             mkdir -p android-project/app/build/design-preview
             adb pull /sdcard/Android/data/com.aistudio.keplerae.stdy/files/design-preview/. android-project/app/build/design-preview/ || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Keplerae-2.5-testes-dispositivo
+          name: Keplerae-2.6-testes-dispositivo
           path: |
             android-project/app/build/reports/androidTests/
             android-project/app/build/design-preview/
