@@ -1,0 +1,60 @@
+name: Resgatar assinatura anterior - somente backup cifrado
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: keplerae-signing-rescue
+  cancel-in-progress: false
+jobs:
+  resgate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RECOVERY_PUBLIC_KEY: |
+        -----BEGIN PUBLIC KEY-----
+        MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA3kHnVJDHCmChYJyGmC2p
+        Eom0If9uqK5KuI2mEaLf0UeGleR9TOH1x9vCodn4WXFed+Rmt/lLpiz0NzkKTcXm
+        5iR4QSQZYd6+C8ze0bLj++A6qlLq+PYZeekzwltX+eO4ILnIzbxRGWSWR4wEzkW8
+        nqEtvbh9XyjSblaxgzV20cpYmN+UgGY5RdRqm780AQcMPj0Bmh0RHVoxLddOM4rF
+        Sdv6Lo/n6f2LG005k7xE2gZM9HhlWVoQSYRFEQud2wWUJoOZGMux63X7H5gAe9sn
+        9HlcNs73pcGSv3nq9vRDjGNpanAuT0bDpA+H+fn5E+GKYxVSnQtZJK79SzleEYmc
+        2gLL+w9E7KiTdfEYniEepqi6AFX6wN9kfqbwYI1cl+XNnePvBDyr7e2l7B2I5M0R
+        0taD4bbPwbrd2+7COyK1VfXYUsyqzuSvaSnQl1xya9H+3mop+76bMrw9872Mseyt
+        BkWiqIsqE1enluxHKQl47M5ODocAJ/REUNM1O/FUPCaIg0fuB2STroLAxf0VAaq2
+        OMRDbDha5kgeF6h73bH/BWIVPQXvayLwkN8wBecxemBRUKPMx+xZrV3OvI+6RxLe
+        VZteDMfWUmbKMO5jw/diSTIJaSXr46tXiliDovHXcffcpE42t0+VCmM43MbjnD1b
+        I3auET+HNWLmharK8Lp05KcCAwEAAQ==
+        -----END PUBLIC KEY-----
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Resgatar assinatura ainda presente no cache
+        uses: actions/cache/restore@v4
+        with:
+          path: android-project/.signing/debug.keystore
+          key: keplerae-native-debug-signing-v1
+          fail-on-cache-miss: true
+      - name: Conferir a assinatura existente
+        run: |
+          test -s android-project/.signing/debug.keystore
+          keytool -exportcert -keystore android-project/.signing/debug.keystore -storepass android -alias androiddebugkey -file /tmp/keplerae-cert.der
+          test "$(sha1sum /tmp/keplerae-cert.der | cut -d' ' -f1)" = '16007901dbbfab9de7b5539ffac604faf19dbc8a'
+      - name: Cifrar antes de disponibilizar o backup
+        run: |
+          umask 077
+          mkdir -p backup
+          printf '%s\n' "$RECOVERY_PUBLIC_KEY" > /tmp/recovery-public.pem
+          openssl rand -base64 48 > /tmp/recovery-password
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -in android-project/.signing/debug.keystore -out backup/debug.keystore.enc -pass file:/tmp/recovery-password
+          openssl pkeyutl -encrypt -pubin -inkey /tmp/recovery-public.pem -in /tmp/recovery-password -out backup/key-password.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
+          sha256sum backup/debug.keystore.enc backup/key-password.enc > backup/SHA256SUMS
+          python3 -c "from pathlib import Path; Path('/tmp/recovery-password').unlink()"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keystore-backup-cifrado
+          path: backup/
+          retention-days: 1
+          if-no-files-found: error
