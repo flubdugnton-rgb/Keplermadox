@@ -1,37 +1,33 @@
-name: Compilar Keplerae 2.4 - Ambientes e evolução
-
+name: Compilar Keplerae 2.5 - Release
 on:
   push:
     branches: [main, master]
+    paths: ['Keplerae-2.5.zip', '.github/workflows/compilar-apk.yml']
   workflow_dispatch:
     inputs:
       testar_interface:
-        description: Executar testes de login, perfil, catálogo e PDF no emulador
+        description: Testar interface e abertura do APK release no emulador
         type: boolean
-        required: false
         default: true
-
 permissions:
   contents: read
-
 concurrency:
   group: apk-zip-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: android-project
     steps:
       - uses: actions/checkout@v4
-      - name: Extrair o projeto 2.4
+      - name: Extrair projeto 2.5
         working-directory: .
         run: |
-          test -f Keplerae-2.4.zip
-          unzip -q Keplerae-2.4.zip -d android-project
+          test -f Keplerae-2.5.zip
+          unzip -q Keplerae-2.5.zip -d android-project
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -45,24 +41,12 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Recuperar assinatura que já funciona no Google
-        uses: actions/cache@v4
-        with:
-          path: android-project/.signing/debug.keystore
-          key: keplerae-native-debug-signing-v1
+      - name: Restaurar assinatura
+        env:
+          KEYSTORE_B64: ${{ secrets.KEPLERAE_KEYSTORE_B64 }}
+        run: python3 scripts/restore_signing.py
       - name: Conferir a assinatura existente
-        run: |
-          test -s .signing/debug.keystore || { echo 'A assinatura anterior não está no cache. Recupere a chave usada no APK 1.2.2 antes de compilar a atualização.'; exit 1; }
-          keytool -exportcert -keystore .signing/debug.keystore -storepass android -alias androiddebugkey -file /tmp/keplerae-cert.der
-          python3 - <<'PY'
-          import hashlib
-          from pathlib import Path
-          expected = '16007901DBBFAB9DE7B5539FFAC604FAF19DBC8A'
-          actual = hashlib.sha1(Path('/tmp/keplerae-cert.der').read_bytes()).hexdigest().upper()
-          if actual != expected:
-              raise SystemExit('A assinatura difere do APK que já funciona. Recupere a chave anterior para preservar atualização e OAuth.')
-          print('Assinatura anterior preservada.')
-          PY
+        run: python3 scripts/verify_signing.py
       - name: Configurar entrada Google
         env:
           GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
@@ -72,41 +56,42 @@ jobs:
           command -v ffmpeg >/dev/null || { sudo apt-get update; sudo apt-get install -y ffmpeg; }
           python3 scripts/fetch_pomodoro_sounds.py
           python3 scripts/fetch_ambient_sounds.py
-      - name: Validar catálogo e rede
+      - name: Validar projeto
         run: |
           python3 scripts/validate_catalog.py
           python3 scripts/validate_network_permissions.py
-      - name: Compilar, testar e verificar
-        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+          python3 scripts/validate_v25.py
+      - name: Compilar release otimizado, testar e verificar
+        run: gradle --no-daemon :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease :app:assembleDebugAndroidTest
       - name: Validar APK e nomear
         run: |
-          python3 scripts/validate_network_permissions.py app/build/outputs/apk/debug/app-debug.apk
-          cp app/build/outputs/apk/debug/app-debug.apk Keplerae-2.4.0-debug.apk
+          python3 scripts/validate_network_permissions.py app/build/outputs/apk/release/app-release.apk
+          cp app/build/outputs/apk/release/app-release.apk Keplerae-2.5.0-release.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: Keplerae-2.4-APK
-          path: android-project/Keplerae-2.4.0-debug.apk
+          name: Keplerae-2.5-APK
+          path: android-project/Keplerae-2.5.0-release.apk
           if-no-files-found: error
           retention-days: 30
-      - name: Resultados das verificações
+      - name: Resultados e mapa R8
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Keplerae-2.4-verificacoes
+          name: Keplerae-2.5-verificacoes
           path: |
             android-project/app/build/reports/tests/
-            android-project/app/build/reports/lint-results-debug.html
+            android-project/app/build/reports/lint-results-release.html
+            android-project/app/build/outputs/mapping/release/
           if-no-files-found: ignore
-
   interface:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.testar_interface }}
     needs: apk
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: Extrair projeto
-        run: unzip -q Keplerae-2.4.zip -d android-project
+        run: unzip -q Keplerae-2.5.zip -d android-project
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -118,18 +103,25 @@ jobs:
         with:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
-      - name: Instalar SDK para compilar testes
+      - name: Instalar SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Recuperar assinatura de teste
-        uses: actions/cache/restore@v4
-        with:
-          path: android-project/.signing/debug.keystore
-          key: keplerae-native-debug-signing-v1
-      - name: Configurar Google para os testes
+      - name: Restaurar assinatura
+        working-directory: android-project
+        env:
+          KEYSTORE_B64: ${{ secrets.KEPLERAE_KEYSTORE_B64 }}
+        run: python3 scripts/restore_signing.py
+      - name: Conferir a assinatura existente
+        working-directory: android-project
+        run: python3 scripts/verify_signing.py
+      - name: Configurar Google
         working-directory: android-project
         env:
           GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
         run: python3 scripts/configure_google_login.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: Keplerae-2.5-APK
+          path: release-apk
       - name: Ativar KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -141,12 +133,13 @@ jobs:
           arch: x86_64
           script: |
             gradle --no-daemon -p android-project :app:connectedDebugAndroidTest
+            python3 android-project/scripts/smoke_release.py release-apk/Keplerae-2.5.0-release.apk
             mkdir -p android-project/app/build/design-preview
             adb pull /sdcard/Android/data/com.aistudio.keplerae.stdy/files/design-preview/. android-project/app/build/design-preview/ || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Keplerae-2.4-testes-dispositivo
+          name: Keplerae-2.5-testes-dispositivo
           path: |
             android-project/app/build/reports/androidTests/
             android-project/app/build/design-preview/
