@@ -41,12 +41,6 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Restaurar assinatura
-        env:
-          KEYSTORE_B64: ${{ secrets.KEPLERAE_KEYSTORE_B64 }}
-        run: python3 scripts/restore_signing.py
-      - name: Conferir a assinatura existente
-        run: python3 scripts/verify_signing.py
       - name: Configurar entrada Google
         env:
           GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
@@ -61,6 +55,13 @@ jobs:
           python3 scripts/validate_catalog.py
           python3 scripts/validate_network_permissions.py
           python3 scripts/validate_v25.py
+      # Valida o código público antes de restaurar a chave privada no runner.
+      - name: Restaurar assinatura
+        env:
+          KEYSTORE_B64: ${{ secrets.KEPLERAE_KEYSTORE_B64 }}
+        run: python3 scripts/restore_signing.py
+      - name: Conferir a assinatura existente
+        run: python3 scripts/verify_signing.py
       - name: Compilar release otimizado, testar e verificar
         run: gradle --no-daemon :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease :app:assembleDebugAndroidTest
       - name: Validar APK e nomear
